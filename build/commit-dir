@@ -38,8 +38,6 @@ fi
 
 [ $# -eq 2 ] || usage;
 
-set -x
-
 branch="$1"
 dir="$2"
 
@@ -56,11 +54,6 @@ fi
 
 tmpindex=$(mktemp)
 
-# Get branch ref if exists
-branch_ref=$(git rev-parse -q --verify "$branch^{commit}" || echo "")
-current_ref=$(git rev-parse -q --verify "HEAD^{commit}" || echo "")
-
-
 cd "$dir"
 prefix=$(git rev-parse --show-prefix)
 cd $(git rev-parse --show-toplevel)
@@ -74,19 +67,17 @@ vecho "tree object: $tree_obj"
 
 parents=()
 # add branch and current branch commits as parents if they exist
-if git rev-parse -q --verify "$branch^{commit}"; then
-    branch_ref=$(git rev-parse --verify "$branch^{commit}")
+if branch_ref=$(git rev-parse -q --verify "$branch^{commit}"); then
     vecho "branch $branch ref: $branch_ref"
     parents=("${parents[@]}" -p "$branch_ref")
 fi
-if git rev-parse -q --verify "HEAD^{commit}"; then
-    current_ref=$(git rev-parse --verify "HEAD^{commit}")
-    vecho "current ref: $current_branch_ref"
+if current_ref=$(git rev-parse -q --verify "HEAD^{commit}"); then
+    vecho "current ref: $current_ref"
     parents=("${parents[@]}" -p "$current_ref")
 fi
 
 commit_msg="derived from $current_branch subdirectory $dir"
-commit_obj=$(git commit-tree "${commit_parents[@]}" -m "$commit_msg" "$tree_obj")
+commit_obj=$(git commit-tree "${parents[@]}" -m "$commit_msg" "$tree_obj")
 
 vecho "commit object: $commit_obj"
 
