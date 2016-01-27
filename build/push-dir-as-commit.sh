@@ -1,34 +1,95 @@
 #!/bin/bash
 
-# Construct commit object from contents of a subdirectory of working tree
+# Construct commit object and update branch from contents of a subdirectory of working tree
 
-where="$1"
+verbose=''
+function vecho {
+    [ -n "$verbose" ] && echo "$@"
+    return 0
+}
 
-if [ ! -d "$where" ]; then
-    echo "'$where' not a directory" >&2
+tmpindex=''
+function onexit {
+    vecho "deleting temporary index file '$tmpindex'"
+    if [ -n "$tmpindex" ]; then rm -f "$tmpindex"; fi
+}
+
+# exit on error, but clean up temporary git index
+set -e
+trap onexit EXIT
+
+function usage {
+    cat <<___
+usage: commit-dir [-v] <branch-name> <directory>
+
+<branch-name> is a name to use for the new or updated branch.
+<directory> must be a sub-directory of the current git work tree.
+If -v is given, give verbose output.
+
+The supplied <branch-name> must not be the current branch.
+___
+    exit 1
+}
+
+if [ "$1" = "-v" ]; then
+    verbose=1
+    shift;
+fi
+
+[ $# -eq 2 ] || usage;
+
+set -x
+
+branch="$1"
+dir="$2"
+
+if [ ! -d "$dir" ]; then
+    echo "'$dir' not a directory" >&2
     exit 1
 fi
 
-# exit on error, but clean up temporary git index
+current_branch=$(git rev-parse --abbrev-ref HEAD)
+if [ "$current_branch" = "$branch" ]; then
+    echo "branch '$branch' is same as current branch." >&2
+    exit 2
+fi
 
-set -e
 tmpindex=$(mktemp)
-function onexit {
-    echo "deleting '$tmpindex'"
-    if [ -n "$tmpindex" ]; then rm -f "$tmpindex"; fi
-}
-trap onexit EXIT
 
-cd "$where"
-gitrelpath=$(git rev-parse --show-prefix)
-
-echo "woo! tmpindex is $tmpindex, repo relpath is $gitrelpath"
+# Get branch ref if exists
+branch_ref=$(git rev-parse -q --verify "$branch^{commit}" || echo "")
+current_ref=$(git rev-parse -q --verify "HEAD^{commit}" || echo "")
 
 
+cd "$dir"
+prefix=$(git rev-parse --show-prefix)
+cd $(git rev-parse --show-toplevel)
 
+# (potential race condition here! but git add does not like a lenth-zero index file)
+rm -f "$tmpindex"
+env GIT_INDEX_FILE="$tmpindex" git add --all "$prefix"
+tree_obj=$(env GIT_INDEX_FILE="$tmpindex" git write-tree --prefix="$prefix")
 
+vecho "tree object: $tree_obj"
 
+parents=()
+# add branch and current branch commits as parents if they exist
+if git rev-parse -q --verify "$branch^{commit}"; then
+    branch_ref=$(git rev-parse --verify "$branch^{commit}")
+    vecho "branch $branch ref: $branch_ref"
+    parents=("${parents[@]}" -p "$branch_ref")
+fi
+if git rev-parse -q --verify "HEAD^{commit}"; then
+    current_ref=$(git rev-parse --verify "HEAD^{commit}")
+    vecho "current ref: $current_branch_ref"
+    parents=("${parents[@]}" -p "$current_ref")
+fi
 
+commit_msg="derived from $current_branch subdirectory $dir"
+commit_obj=$(git commit-tree "${commit_parents[@]}" -m "$commit_msg" "$tree_obj")
 
+vecho "commit object: $commit_obj"
 
+# point branch to commit
+git branch -f "$branch" "$commit_obj"
 
